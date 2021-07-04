@@ -1,0 +1,31 @@
+version: "3.8"
+services:
+    oppai-server:
+        restart: "unless-stopped" 
+        build: .
+        ports: 
+            - "5000:5000"
+        env_file: 
+            - oppai.env
+
+        volumes:
+            - ./go-oppai-firebase-secrets.json:/app/go-oppai-firebase-secrets.json
+
+        depends_on: 
+            - database
+    
+    database:
+        image: "postgres" # use latest official postgres version
+        env_file:
+            - oppai.env # configure postgres
+
+    pgadmin:
+        image: "dpage/pgadmin4"
+        env_file: 
+            - oppai.env
+        ports:
+            - "80:80"
+        
+        environment: 
+            - "PGADMIN_DEFAULT_EMAIL=123@sad.de"
+            - "PGADMIN_DEFAULT_PASSWORD=123"
