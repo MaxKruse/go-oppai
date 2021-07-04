@@ -5,3 +5,7 @@ This is a webserver that uses the osu api to download beatmap files for specifie
 # Setup
 
 Copy and fill your `oppai.env` file. API Keys are at https://osu.ppy.sh/p/api
+
+# Misc
+
+This is my first go project, its terrible. I know. PR me improvements if you dare.
