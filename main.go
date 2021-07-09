@@ -74,10 +74,12 @@ func getOppai(w http.ResponseWriter, r *http.Request) {
 	var res PerformanceResponse
 
 	count := int64(0)
-	db.Model(&PerformanceResponse{}).Where("map_md5 = ?", req.Beatmap).Count(&count)
+	db.Model(&PerformanceResponse{}).Where(req).Count(&count)
+
+	log.Println(req)
 
 	if count > 0 {
-		db.First(&res, "map_md5 = ?", req.Beatmap)
+		db.First(&res, req)
 		// We have the hash, just return
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(res)
@@ -142,7 +144,7 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 
 	// Check if beatmap exists in database
 	count := int64(0)
-	err = db.Model(&PerformanceResponse{}).Where("map_md5 = ? AND mods = ? AND accuracy = ?", incomming.Beatmap, incomming.Mods, incomming.Accuracy).Count(&count).Error
+	err = db.Model(&PerformanceResponse{}).Where(incomming).Count(&count).Error
 
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -221,7 +223,6 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 		acc = oppai.Acc(float64(100.0), len(beatmap.Objects), int(incomming.Miss))
 	}
 
-	accPercent := acc.Value()
 	cfg.N300 = uint16(acc.N300)
 	cfg.N100 = uint16(acc.N100)
 	cfg.N50 = uint16(acc.N50)
@@ -252,7 +253,9 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 
 	if count > 0 {
 		var temp PerformanceResponse
-		db.First(&temp, "map_md5 = ? AND mods = ? AND accuracy = ?", incomming.Beatmap, incomming.Mods, accPercent)
+		log.Println("Already have it.")
+		db.First(&temp, incomming)
+		log.Println(temp)
 		temp.PP = math.Round(temp.PP*10000) / 10000
 
 		then := temp.UpdatedAt

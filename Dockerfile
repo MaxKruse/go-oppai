@@ -1,8 +1,6 @@
-FROM golang:1.16-alpine
+FROM golang:1.16-alpine AS builder
 
 WORKDIR /app
-
-RUN mkdir -p /data/beatmaps
 
 COPY go.mod .
 COPY go.sum .
@@ -14,6 +12,14 @@ COPY . .
 # Build the Go app
 RUN go build -o ./out/go-oppai .
 
+FROM alpine:3.9
+
+WORKDIR /app
+
+RUN mkdir -p /data/beatmaps
+
+COPY --from=builder /app/out .
+
 EXPOSE 5000
 
-CMD ["./out/go-oppai"]
+CMD ["./go-oppai"]

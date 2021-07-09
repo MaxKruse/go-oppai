@@ -3,7 +3,7 @@ module github.com/maxkruse/go-oppai
 go 1.16
 
 require (
-	github.com/MaxKruse/oppai5 v0.0.1
+	github.com/MaxKruse/oppai5 v1.1.2
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
 	github.com/jackc/pgproto3/v2 v2.1.0 // indirect
