@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,14 +35,15 @@ var (
 )
 
 type OppaiRequest struct {
-	Beatmap  string  `json:"md5"`
-	Mods     uint32  `json:"mods,omitempty"`
-	Accuracy float32 `json:"accuracy,omitempty"`
-	Combo    int32   `json:"combo,omitempty"`
-	N300     int32   `json:"300,omitempty"`
-	N100     int32   `json:"100,omitempty"`
-	N50      int32   `json:"50,omitempty"`
-	Miss     int32   `json:"Miss,omitempty"`
+	Beatmap    string  `json:"md5,omitempty"`
+	Beatmap_ID int32   `json:"beatmap_id,omitempty"`
+	Mods       uint32  `json:"mods,omitempty"`
+	Accuracy   float32 `json:"accuracy,omitempty"`
+	Combo      int32   `json:"combo,omitempty"`
+	N300       int32   `json:"300,omitempty"`
+	N100       int32   `json:"100,omitempty"`
+	N50        int32   `json:"50,omitempty"`
+	Miss       int32   `json:"Miss,omitempty"`
 }
 
 type PerformanceResponse struct {
@@ -64,9 +66,10 @@ func getOppai(w http.ResponseWriter, r *http.Request) {
 	err := decoder.Decode(&req, r.URL.Query())
 
 	// if we cant decode, tell error
-	if err != nil || len(req.Beatmap) < 1 {
+	if err != nil || (len(req.Beatmap) < 1 && req.Beatmap_ID < 1) {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(ErrorResponse{400, fmt.Sprintf("Malformed request body: %s - Expected at least 'beatmap=<hash>'", r.URL.Query())})
+		log.Println(req)
+		json.NewEncoder(w).Encode(ErrorResponse{400, fmt.Sprintf("Malformed request body: (MD5: %v) (ID: %v) - Expected at least 'md5=<hash>' or 'beatmap_id=<id>'", req.Beatmap, req.Beatmap_ID)})
 		return
 	}
 
@@ -75,8 +78,6 @@ func getOppai(w http.ResponseWriter, r *http.Request) {
 
 	count := int64(0)
 	db.Model(&PerformanceResponse{}).Where(req).Count(&count)
-
-	log.Println(req)
 
 	if count > 0 {
 		db.First(&res, req)
@@ -88,7 +89,7 @@ func getOppai(w http.ResponseWriter, r *http.Request) {
 
 	// We dont have a hash, return error
 	w.WriteHeader(http.StatusNotFound)
-	json.NewEncoder(w).Encode(ErrorResponse{404, fmt.Sprintf("Beatmap not found: %s", req.Beatmap)})
+	json.NewEncoder(w).Encode(ErrorResponse{404, fmt.Sprintf("Beatmap not found: (MD5: %v) (ID: %v)", req.Beatmap, req.Beatmap_ID)})
 }
 
 // DownloadFile will download a url to a local file. It's efficient because it will
@@ -135,7 +136,7 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 	// URL params to OppaiRequest
 	err := json.NewDecoder(r.Body).Decode(&incomming)
 
-	if err != nil || len(incomming.Beatmap) < 1 {
+	if err != nil || (len(incomming.Beatmap) < 1 && incomming.Beatmap_ID < 1) {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Fatalln(err)
 		json.NewEncoder(w).Encode(ErrorResponse{400, fmt.Sprintf("Malformed request body: %s - Expected at least 'beatmap=<hash>'", r.Body)})
@@ -154,32 +155,47 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// download beatmap file if not exist
-	beatmapPath := fmt.Sprintf("%s\\%v.osu", downloadPath, incomming.Beatmap)
-	// Download beatmapPath is the hash, not beatmapid
+	beatmapPath := fmt.Sprintf("%s\\%v.osu", downloadPath, incomming.Beatmap_ID)
+	// Download beatmapPath is the hash, not Beatmap_ID
 	beatmapPath = strings.ReplaceAll(beatmapPath, "\\", "/")
 
 	// check if we have the .osu file
 	if _, err = os.Stat(beatmapPath); os.IsNotExist(err) {
-		// Get Beatmap ID from checksum
-		// See: https://github.com/ppy/osu-api/wiki
-		beatmapResponse, err := get_osuapi("/get_beatmaps", fmt.Sprintf("h=%v", incomming.Beatmap))
+		var Beatmap_ID string
+		var local PerformanceResponse
+		var search PerformanceResponse
 
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			log.Fatalln(err)
-			json.NewEncoder(w).Encode(ErrorResponse{400, fmt.Sprintf("Could not get API response for beatmap hash: %v", r.Body)})
-			return
+		search.Beatmap = incomming.Beatmap
+
+		db.First(&local, search)
+
+		// if we need the id, get it
+		if local.Beatmap_ID < 1 {
+			// Get Beatmap ID from checksum
+			// See: https://github.com/ppy/osu-api/wiki
+			beatmapResponse, err := get_osuapi("/get_beatmaps", fmt.Sprintf("h=%v", incomming.Beatmap))
+
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				log.Fatalln(err)
+				json.NewEncoder(w).Encode(ErrorResponse{400, fmt.Sprintf("Could not get API response for beatmap hash: %v", r.Body)})
+				return
+			}
+			bm := beatmapResponse[0]
+			Beatmap_ID = bm["beatmap_id"].(string)
+			tmp, _ := strconv.Atoi(Beatmap_ID)
+			incomming.Beatmap_ID = int32(tmp)
+		} else {
+			incomming.Beatmap_ID = local.Beatmap_ID
 		}
 
-		beatmapID := beatmapResponse[0]["beatmap_id"].(string)
-		url := fmt.Sprintf("https://osu.ppy.sh/osu/%v", beatmapID)
-
+		url := fmt.Sprintf("https://osu.ppy.sh/osu/%v", incomming.Beatmap_ID)
 		err = DownloadFile(beatmapPath, url)
 
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			log.Fatalln(err)
-			json.NewEncoder(w).Encode(ErrorResponse{500, fmt.Sprintf("Could not download beatmap (MD5 %v) (ID %v)", incomming.Beatmap, beatmapID)})
+			json.NewEncoder(w).Encode(ErrorResponse{500, fmt.Sprintf("Could not download beatmap (MD5 %v) (ID %v)", incomming.Beatmap, incomming.Beatmap_ID)})
 			return
 		}
 	}
@@ -189,7 +205,7 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Fatalln(err)
-		json.NewEncoder(w).Encode(ErrorResponse{500, fmt.Sprintf("Could not open beatmap (MD5 %v)", incomming.Beatmap)})
+		json.NewEncoder(w).Encode(ErrorResponse{500, fmt.Sprintf("Could not open beatmap (MD5 %v) (ID %v)", incomming.Beatmap, incomming.Beatmap_ID)})
 		return
 	}
 	beatmap := oppai.Parse(f)
@@ -247,15 +263,15 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 	// Prepare result
 	var resp PerformanceResponse
 	resp.Beatmap = incomming.Beatmap
+	resp.Beatmap_ID = incomming.Beatmap_ID
 	resp.PP = oppai.PPInfo(beatmap, &cfg).PP.Total
 	resp.Accuracy = float32(acc.Value())
 	resp.Mods = incomming.Mods
 
 	if count > 0 {
 		var temp PerformanceResponse
-		log.Println("Already have it.")
 		db.First(&temp, incomming)
-		log.Println(temp)
+		resp.Beatmap_ID = temp.Beatmap_ID
 		temp.PP = math.Round(temp.PP*10000) / 10000
 
 		then := temp.UpdatedAt
@@ -278,7 +294,6 @@ func generateOppai(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db.Save(&resp)
-	// options := &oppai.Parameters{Combo: uint16(beatmap.MaxCombo), N300: uint16(beatmap.NCircles + beatmap.NSliders + beatmap.NSpinners), N100: 0, N50: 0, Misses: 0, Mods: 0}
 	json.NewEncoder(w).Encode(&resp)
 }
 
